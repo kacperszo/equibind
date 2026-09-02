@@ -12,8 +12,21 @@ reproduced model. As of 2026-08-31 it also loads the authors' published weights.
 
 ## Current state
 
-**The authors' `best_checkpoint.pt` loads completely**: 597/597 parameters, zero missing,
-8 keys ignored (the docking head this port does not have).
+Done for `embed` and `dock`.
+
+| | |
+|---|---|
+| docking | **11.7 Å median** on 285/285, beating the do-nothing baseline on 96% |
+| embedding | 128d, probe R **0.428** — **does not clear** the size baseline's 0.470 |
+
+That embedding result is not a bug and was rechecked after every fix: EquiBind was trained to
+*place* a ligand, so its representation encodes geometry and shape complementarity rather than
+binding strength. A linear probe for affinity asks it for something it was never taught. Report
+it plainly rather than explaining it away.
+
+**The authors' `best_checkpoint.pt` loads completely**: 597/597 parameters, zero missing. The
+8 keys that were once ignored are the docking head, which `equibind/models/head.py` now
+implements — keypoint attention plus the Kabsch fit.
 
 The encoder must be constructed with the authors' own training configuration, taken from
 `runs/flexible_self_docking/train_arguments.yaml` in their repository:
