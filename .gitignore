@@ -16,3 +16,9 @@ venv/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+
+# authors' published weights — fetched, not versioned
+checkpoints/
+
+# scratch logs from dataset construction
+temp_*.log

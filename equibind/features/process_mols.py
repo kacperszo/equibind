@@ -23,10 +23,15 @@ lig_feature_dims = (
 )
 
 # Receptor residue-level features (C-alpha graph, default)
-#   Categorical: amino_acid_type (37 classes)
+#   Categorical: amino_acid_type (38 classes)
 #   Scalar: SASA, B-factor
 rec_residue_feature_dims = (
-    [37],
+    # 38, not 37: the authors' `possible_amino_acids` is the 20 standard residues plus 17
+    # non-standard ones (HIP, HIE, TPO, HID, LEV, MEU, PTR, GLV, CYT, SEP, HIZ, CYM, GLM,
+    # ASQ, TYS, CYX, GLZ) and a trailing 'misc'. Getting this wrong by one silently shifts
+    # every residue index, so features would be encoded differently from the published
+    # weights while everything still runs.
+    [38],
     2,  # SASA, B-factor
 )
 
