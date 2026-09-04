@@ -78,6 +78,24 @@ def to_dgl(pyg_graph, is_ligand: bool):
     return g
 
 
+def alias_old_dgl_functions() -> list[str]:
+    """Restore the DGL 0.x message-function names the authors' code calls.
+
+    `dgl.function.copy_edge` and `copy_src` were renamed to `copy_e` and `copy_u` in DGL 1.0.
+    These are renames, not behaviour changes, so aliasing them lets the original run unmodified
+    under DGL 2.1 — which is the point: the comparison must exercise the authors' code, not a
+    version of it we edited.
+    """
+    import dgl.function as fn
+
+    restored = []
+    for old_name, new_name in (("copy_edge", "copy_e"), ("copy_src", "copy_u")):
+        if not hasattr(fn, old_name) and hasattr(fn, new_name):
+            setattr(fn, old_name, getattr(fn, new_name))
+            restored.append(f"{old_name}->{new_name}")
+    return restored
+
+
 def report(name: str, a: torch.Tensor, b: torch.Tensor) -> bool:
     a, b = a.detach().cpu().double(), b.detach().cpu().double()
     if a.shape != b.shape:
@@ -113,23 +131,56 @@ def main() -> int:
     params = yaml.safe_load(Path(args.args).read_text())["model_parameters"]
     params["noise_initial"] = 0          # see module docstring
     params["debug"] = False
+    # Geometry regularization is disabled here because no geometry graph is passed, and
+    # upstream dereferences it unconditionally while the port guards on None. That guard is
+    # itself a finding — `embed_complexes.py` calls the encoder without a geometry graph, so
+    # production embeddings skip a correction the trained model had enabled, and the port
+    # never ported `get_geometry_graph`. Isolating the arithmetic means switching it off on
+    # both sides; comparing it on requires porting that builder first.
+    params["geometry_regularization"] = False
+    params["loss_geometry_regularization"] = False
     print(f"config: n_lays={params['n_lays']} residue_emb_dim={params['residue_emb_dim']} "
           f"num_att_heads={params['num_att_heads']} noise_initial=0 (forced)")
 
     import equibind.features.featurize as port_feat
     from equibind.models.encoder import EquiBindEncoder
-    from models.equibind import IEGMN  # noqa: E402  (upstream)
+    from equibind.models.layers import IEGMN_Layer as PortLayer
+    from models.equibind import IEGMN, IEGMN_Layer  # noqa: E402  (upstream)
 
-    def filtered(cls, extra=None):
+    def filtered(cls, extra=None, inner_classes=()):
+        """Keep only what the constructor accepts — unless it takes **kwargs.
+
+        Upstream's IEGMN forwards several arguments to IEGMN_Layer through **kwargs rather
+        than naming them, so filtering on the explicit signature alone drops them and the
+        layer constructor fails on missing positionals.
+        """
         allowed = set(inspect.signature(cls.__init__).parameters)
+        for inner in inner_classes or ():
+            # IEGMN names some arguments only in IEGMN_Layer and forwards them via **kwargs,
+            # so the union of both signatures is what it really accepts. Passing everything
+            # instead fails the other way: IEGMN_Layer rejects IEGMN-only keys.
+            allowed |= set(inspect.signature(inner.__init__).parameters)
         out = {k: v for k, v in params.items() if k in allowed}
         out.update(extra or {})
         return out
 
+    # Graphs first: the edge feature widths are properties of the data, not of the config,
+    # and both constructors need them.
+    lig_pyg, rec_pyg = build_graphs(port_feat, args.id, args.complex_dir,
+                                    args.lig_radius, args.rec_cutoff, args.rec_max_neighbor)
+    print(f"graphs: ligand {int(lig_pyg.num_nodes)} nodes / {lig_pyg.edge_index.shape[1]} edges, "
+          f"receptor {int(rec_pyg.num_nodes)} nodes / {rec_pyg.edge_index.shape[1]} edges")
+    dims = dict(device="cpu",
+                lig_input_edge_feats_dim=int(lig_pyg.edge_attr.shape[1]),
+                rec_input_edge_feats_dim=int(rec_pyg.edge_attr.shape[1]))
+    print(f"edge feature dims: ligand {dims['lig_input_edge_feats_dim']}, "
+          f"receptor {dims['rec_input_edge_feats_dim']}")
+
     torch.manual_seed(0)
-    up_model = IEGMN(device="cpu", **filtered(IEGMN, {"device": "cpu"}))
+    up_model = IEGMN(**filtered(IEGMN, dims, inner_classes=(IEGMN_Layer,)))
     torch.manual_seed(0)
-    pt_model = EquiBindEncoder(device="cpu", **filtered(EquiBindEncoder, {"device": "cpu"}))
+    pt_model = EquiBindEncoder(**filtered(EquiBindEncoder, dims,
+                                          inner_classes=(PortLayer,)))
 
     ck = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
     state = ck.get("model_state_dict", ck)
@@ -143,11 +194,11 @@ def main() -> int:
             print(f"    missing: {real_missing[:5]}")
     up_model.eval(), pt_model.eval()
 
-    lig_pyg, rec_pyg = build_graphs(port_feat, args.id, args.complex_dir,
-                                    args.lig_radius, args.rec_cutoff, args.rec_max_neighbor)
-    print(f"graphs: ligand {int(lig_pyg.num_nodes)} nodes / {lig_pyg.edge_index.shape[1]} edges, "
-          f"receptor {int(rec_pyg.num_nodes)} nodes / {rec_pyg.edge_index.shape[1]} edges")
     lig_dgl, rec_dgl = to_dgl(lig_pyg, True), to_dgl(rec_pyg, False)
+
+    restored = alias_old_dgl_functions()
+    if restored:
+        print(f"dgl compatibility aliases: {', '.join(restored)}")
 
     captured: list = []
     up_model.iegmn_layers[-1].register_forward_hook(
