@@ -84,6 +84,13 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--ligand", required=True)
     p.add_argument("--receptor", default=None, help="protein pdb; enables the receptor half")
+    # Defaults are the production settings from embed_complexes.py, not the featuriser's own
+    # signature defaults. Comparing at radius=20/cutoff=20 checks a graph the model never
+    # actually sees; the neighbour selection is exactly where a port is most likely to differ.
+    p.add_argument("--lig-radius", type=float, default=5)
+    p.add_argument("--lig-max-neighbors", type=int, default=0, help="0 means None")
+    p.add_argument("--rec-cutoff", type=float, default=30)
+    p.add_argument("--rec-max-neighbor", type=int, default=10)
     p.add_argument("--upstream", default="/upstream")
     args = p.parse_args()
 
@@ -146,7 +153,9 @@ def main() -> int:
         return 0 if ok else 1
     # use_rdkit_coords=False on purpose: the rdkit conformer path is stochastic, and a
     # difference there would say nothing about the port.
-    kw = dict(name="cmp", radius=20, max_neighbors=None, use_rdkit_coords=False)
+    kw = dict(name="cmp", radius=args.lig_radius,
+              max_neighbors=args.lig_max_neighbors or None, use_rdkit_coords=False)
+    print(f"  settings: radius={kw['radius']} max_neighbors={kw['max_neighbors']}")
     g_up = up.get_lig_graph_revised(mol, **kw)
     g_pt = port.get_lig_graph_revised(mol, **kw)
 
@@ -180,7 +189,8 @@ def main() -> int:
             ok &= compare(nm, a, b)
 
         print("\n--- receptor graph construction (DGL vs PyG) ---")
-        gk = dict(cutoff=20, max_neighbor=None)
+        gk = dict(cutoff=args.rec_cutoff, max_neighbor=args.rec_max_neighbor or None)
+        print(f"  settings: cutoff={gk['cutoff']} max_neighbor={gk['max_neighbor']}")
         rg_up = up.get_calpha_graph(r_up[0], r_up[2], r_up[3], r_up[4], **gk)
         rg_pt = port.get_calpha_graph(r_pt[0], r_pt[2], r_pt[3], r_pt[4], **gk)
 
