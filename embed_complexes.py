@@ -23,8 +23,9 @@ import torch
 from rdkit import RDLogger
 from tqdm import tqdm
 
-from equibind.features.featurize import (get_calpha_graph, get_lig_graph_revised,
-                                         get_receptor_inference, read_molecule)
+from equibind.features.featurize import (get_calpha_graph, get_geometry_graph,
+                                         get_lig_graph_revised, get_receptor_inference,
+                                         read_molecule)
 from equibind.models.encoder import EquiBindEncoder
 
 RDLogger.DisableLog("rdApp.*")
@@ -58,8 +59,20 @@ REC_CUTOFF = 30       # rec_graph_radius
 REC_MAX_NEIGHBOURS = 10  # c_alpha_max_neighbors
 
 
-def load_encoder(path: str, device: str) -> EquiBindEncoder:
-    enc = EquiBindEncoder(device=device, **ENCODER_CONFIG).to(device)
+def load_encoder(path: str, device: str, noise: bool = True) -> EquiBindEncoder:
+    """Build the encoder and restore the published weights.
+
+    `noise` exists because EquiBind's forward adds `noise_level * randn_like(...)` to features
+    and coordinates whenever `noise_initial > 0`, and there is no `self.training` guard — so
+    the authors' own settings make *inference* stochastic, at level 0.5 on the first epoch.
+    That is faithful, and it is also why two embedding runs of the same complex disagree.
+    Passing noise=False keeps everything else identical and makes the encoder deterministic,
+    which is what a frozen representation for transfer should be.
+    """
+    config = dict(ENCODER_CONFIG)
+    if not noise:
+        config["noise_initial"] = 0
+    enc = EquiBindEncoder(device=device, **config).to(device)
     ck = torch.load(path, map_location=device, weights_only=True)
     state = ck["model_state_dict"] if "model_state_dict" in ck else ck
     # the authors prefix the whole encoder with `iegmn.`; what remains after stripping it
@@ -84,7 +97,12 @@ def featurize(complex_dir: str, cid: str):
     rec, _coords, c_alpha, n, c = get_receptor_inference(f"{complex_dir}/{cid}_protein.pdb")
     rec_graph = get_calpha_graph(rec, c_alpha, n, c, cutoff=REC_CUTOFF,
                                  max_neighbor=REC_MAX_NEIGHBOURS)
-    return lig_graph, rec_graph
+    # The trained weights were fitted with geometry_regularization on, and each IEGMN layer
+    # uses this graph to pull evolved coordinates back towards the bonded distances. Omitting
+    # it is silent — the encoder simply skips the correction — but it changes the node
+    # representations too, because later layers derive their messages from distances.
+    geom_graph = get_geometry_graph(ligand)
+    return lig_graph, rec_graph, geom_graph
 
 
 def main() -> None:
@@ -94,10 +112,13 @@ def main() -> None:
     parser.add_argument("--out", required=True)
     parser.add_argument("--pool", default="sum", choices=sorted(POOLS))
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--no-noise", action="store_true",
+                        help="disable the inference-time noise the authors leave on; "
+                             "makes the embedding deterministic")
     args = parser.parse_args()
 
     device = args.device if torch.cuda.is_available() else "cpu"
-    encoder = load_encoder(args.model, device)
+    encoder = load_encoder(args.model, device, noise=not args.no_noise)
     pool = POOLS[args.pool]
 
     dirs = sorted(d for d in os.listdir(args.complexes)
@@ -108,11 +129,13 @@ def main() -> None:
 
     for cid in tqdm(dirs, desc="Embedding"):
         try:
-            lig_graph, rec_graph = featurize(os.path.join(args.complexes, cid), cid)
+            lig_graph, rec_graph, geom_graph = featurize(
+                os.path.join(args.complexes, cid), cid)
             with torch.no_grad():
                 # (h_lig, h_rec, coords_lig, coords_rec, geom_losses) — only the first two
                 # are the representation; the coordinates are where it moved the atoms
-                h_lig, h_rec = encoder(lig_graph.to(device), rec_graph.to(device))[:2]
+                h_lig, h_rec = encoder(lig_graph.to(device), rec_graph.to(device),
+                                       geom_graph.to(device))[:2]
             vectors.append(torch.cat([pool(h_lig), pool(h_rec)]).cpu().numpy())
             ids.append(cid)
         except Exception as e:

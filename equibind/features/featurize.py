@@ -418,6 +418,47 @@ def get_lig_graph_revised(mol, name, radius=20, max_neighbors=None, use_rdkit_co
     return graph
 
 
+def get_geometry_graph(lig) -> Data:
+    """Ligand graph over 1- and 2-hop bonded neighbours, with their true distances.
+
+    This is the constraint the model's geometry regularization pulls towards: `edge_attr`
+    holds the distance each pair *should* keep, measured on the input conformer, and each
+    IEGMN layer nudges the evolved coordinates back towards it.
+
+    Ported from the authors' `commons/process_mols.py:get_geometry_graph`. It was missing from
+    this port, and its absence was silent — the encoder guards on `geom_data is not None`, so
+    calling it without one skipped a correction the trained weights were fitted with, on every
+    one of the eight layers. Because later layers derive messages from distances, that changes
+    the node representations too, not only the coordinates.
+
+    Edge construction follows the original exactly, including the parts that look accidental:
+    the neighbour set is deduplicated through a `set` (so edge order follows set iteration,
+    not atom index), and the source atom is removed from its own neighbour list *after* the
+    union, so an isolated atom contributes nothing.
+    """
+    coords = lig.GetConformer().GetPositions()
+    edges_src, edges_dst = [], []
+    for i, atom in enumerate(lig.GetAtoms()):
+        src_idx = atom.GetIdx()
+        assert src_idx == i
+        one_hop = list(atom.GetNeighbors())
+        idx = [n.GetIdx() for n in one_hop]
+        for hop in one_hop:
+            for two_hop in hop.GetNeighbors():
+                idx.append(two_hop.GetIdx())
+        all_dst = list(set(idx))
+        if len(all_dst) == 0:
+            continue
+        all_dst.remove(src_idx)
+        edges_src.extend([src_idx] * len(all_dst))
+        edges_dst.extend(all_dst)
+
+    edge_index = torch.stack([torch.tensor(edges_src), torch.tensor(edges_dst)]).long()
+    dist = np.linalg.norm(coords[edges_src] - coords[edges_dst], axis=1).astype(np.float32)
+    return Data(edge_index=edge_index, edge_attr=torch.from_numpy(dist),
+                num_nodes=lig.GetNumAtoms())
+
+
 def distance_featurizer(dist_list, divisor) -> torch.Tensor:
     # you want to use a divisor that is close to 4/7 times the average distance that you want to encode
     length_scale_list = [1.5 ** x for x in range(15)]

@@ -175,6 +175,14 @@ def main() -> int:
     ok &= compare("node coordinates", g_up.ndata["x"], g_pt.pos)
     ok &= compare("edge features", g_up.edata["feat"], g_pt.edge_attr)
 
+    print("\n--- geometry graph (1- and 2-hop bonded pairs) ---")
+    gg_up = up.get_geometry_graph(mol)
+    gg_pt = port.get_geometry_graph(mol)
+    su, du = (t.long() for t in gg_up.edges())
+    ok &= compare("geom edge src", su, gg_pt.edge_index[0])
+    ok &= compare("geom edge dst", du, gg_pt.edge_index[1])
+    ok &= compare("geom distances", gg_up.edata["feat"], gg_pt.edge_attr)
+
     if args.receptor:
         print("\n--- receptor parsing (biopandas path, identical code both sides) ---")
         r_up = up.get_receptor_inference(args.receptor)
