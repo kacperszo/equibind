@@ -1,3 +1,27 @@
+<!-- gnn-benchmark:begin -->
+# Running this in gnn-benchmark
+
+EquiBind's published task is **docking**, not scoring, so it is the one model here measured by
+ligand RMSD rather than affinity.
+
+| variant | capabilities | golden |
+|---|---|---|
+| `equibind.modern` | dock, embed | none yet — `verify` skips it |
+
+```bash
+gnnb run --variant equibind.modern --capability dock  --dataset <complexes> --gpu
+gnnb run --variant equibind.modern --capability embed --dataset <complexes>
+```
+
+This fork is a PyG rewrite rather than a DGL fork, which is why it runs on any current torch
+while the DGL-based models in this roster needed porting. The docking head is absent by design
+in the embedding path: ligand and receptor node embeddings are pooled separately and
+concatenated. See [CLAUDE.md](CLAUDE.md).
+
+<!-- gnn-benchmark:end -->
+
+---
+
 # EquiBind Embedding Layer — PyTorch Geometric Port
 
 A faithful PyTorch Geometric port of the **IEGMN encoder** from
