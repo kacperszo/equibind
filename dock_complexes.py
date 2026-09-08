@@ -27,6 +27,8 @@ import argparse
 import os
 import warnings
 
+import zlib
+
 import numpy as np
 import pandas as pd
 import torch
@@ -99,13 +101,30 @@ def main() -> None:
     parser.add_argument("--model", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--device", default="cpu")
-    parser.add_argument("--seed", type=int, default=0, help="the random placement is stochastic")
+    parser.add_argument("--noise", action="store_true",
+                        help="restore the authors' stochastic inference: EquiBind adds noise "
+                             "in forward with no training guard, so this makes repeated runs "
+                             "disagree by several angstroms")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="the starting pose is random; this makes it reproducible, and "
+                             "each complex is seeded from it independently")
     args = parser.parse_args()
 
-    rng = np.random.RandomState(args.seed)
+    # Load-bearing, and this is the second of the two random sources: the Kabsch fit perturbs
+    # its covariance with `torch.rand` until it is well conditioned, and on real complexes the
+    # keypoints are nearly coplanar so it fires every time. With the encoder's noise off but
+    # this unpinned, two runs still disagreed by up to 0.5 A on 14 of 24 complexes. Seeding
+    # makes all 24 bit-identical, which is what lets a run of this be a golden.
+    torch.manual_seed(args.seed)
 
     device = args.device if torch.cuda.is_available() else "cpu"
-    encoder = load_encoder(args.model, device)
+    # noise off by default, unlike the authors' inference. EquiBind's forward adds
+    # `noise_level * randn_like(...)` with no `self.training` guard, so their own settings make
+    # docking stochastic: two identical runs of these 24 complexes disagreed by up to 33 A.
+    # A result that cannot be reproduced cannot be a golden, and the noise is a training-time
+    # augmentation that leaked into inference through a missing guard rather than a modelling
+    # choice. `--noise` restores their behaviour for anyone who wants it.
+    encoder = load_encoder(args.model, device, noise=args.noise)
     head = load_head(args.model, device)
 
     dirs = sorted(d for d in os.listdir(args.complexes)
@@ -135,7 +154,15 @@ def main() -> None:
             # field (models/equibind.py:749), so `pos` has to be replaced with it or the
             # model is handed the answer it is supposed to predict.
             aligned = lig_graph.new_x.numpy().astype(np.float32)
-            conformer = random_placement(aligned, rng=rng)
+            # Seeded per complex, not from a stream shared across the run. A single
+            # RandomState consumed in a loop makes every complex's starting pose depend on
+            # how many draws the ones before it used, so adding a complex, dropping one, or
+            # reordering the directory shifts every pose after it — the recorded RMSDs then
+            # differ on all 285 rather than on the one that changed. crc32 of the id, not
+            # hash(), which Python randomises per process.
+            placement_rng = np.random.RandomState(
+                (args.seed + zlib.crc32(cid.encode())) % (2 ** 32))
+            conformer = random_placement(aligned, rng=placement_rng)
             lig_graph.pos = torch.from_numpy(conformer)
             rec, _c, ca, n, c = get_receptor_inference(f"{d}/{cid}_protein.pdb")
             rec_graph = get_calpha_graph(rec, ca, n, c, cutoff=REC_CUTOFF,

@@ -110,8 +110,8 @@ weights loaded, and only the numbers were wrong:
 coordinates equivariant to within 4e-05 under random rotation and translation. That is the
 gate that matters, because the encoder is what the embeddings come from.
 
-The full docking pipeline is *not* deterministic, and that is faithful rather than broken.
-Two parts of the published method introduce randomness:
+**The published method is stochastic; this port runs it deterministically by default.** Two
+parts introduce randomness:
 
 - **Noise at inference.** `noise_initial * noise_decay_rate ** (epoch + 1)` with the authors'
   `noise_initial: 1`, `noise_decay_rate: 0.5`, and `epoch=0` passed by their own
@@ -121,9 +121,31 @@ Two parts of the published method introduce randomness:
   2, 0.02, 6e-05) so it fires every time. The perturbation lives in the world frame, which
   makes the solved rotation depend on the input orientation.
 
-Together these put roughly 0.3-0.5 A of irreducible spread on the predicted pose. **Any single
-RMSD from this model is a draw from a distribution, not a measurement** — including the
-authors' published figures.
+Together these put roughly 0.3-0.5 A of spread on the predicted pose as the authors run it.
+**Any single RMSD from published EquiBind is a draw from a distribution, not a measurement** —
+including their own figures.
+
+Both are now off by default, and `--noise` restores the authors' behaviour:
+
+- the encoder's noise is a *training* augmentation that reached inference through a missing
+  `self.training` guard, so switching it off is closer to what the model was meant to do than
+  leaving it on. It is also better: on 24 complexes, within-5 A went from 3.2% to 58.3% and
+  the model beat the untouched conformer on 100% of them rather than 95%.
+- the Kabsch perturbation cannot be removed — it is what keeps the fit conditioned — so it is
+  pinned instead, with `torch.manual_seed`. Without that line, and with the encoder noise
+  already off, two identical runs still disagreed by up to 0.5 A on 14 of 24 complexes.
+  Threads were not the cause; this was.
+
+The placement seed is now derived per complex, from `crc32(complex_id)` rather than drawn from
+one stream shared across the run. A shared stream made every pose depend on how many draws the
+complexes before it consumed, so adding or dropping one shifted all of them — which is why the
+first recorded golden disagreed with a rerun on all 285 rather than on the one that changed.
+
+`gnnb verify equibind.modern` now reproduces docking to 3.6e-15.
+
+**A number that has to be remeasured:** the probe figures below were taken with the encoder
+noise on. They are a draw from a distribution, and the deterministic path may not give the
+same answer.
 
 **The embeddings were recomputed after every fix and the conclusion did not change.** The
 probe gives R=0.428 against a trivial baseline of 0.470 — before the fixes it was 0.442, so

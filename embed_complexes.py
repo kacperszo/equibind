@@ -112,13 +112,21 @@ def main() -> None:
     parser.add_argument("--out", required=True)
     parser.add_argument("--pool", default="sum", choices=sorted(POOLS))
     parser.add_argument("--device", default="cuda:0")
-    parser.add_argument("--no-noise", action="store_true",
-                        help="disable the inference-time noise the authors leave on; "
-                             "makes the embedding deterministic")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="pins torch's global generator; load-bearing for reproducibility")
+    parser.add_argument("--noise", action="store_true",
+                        help="restore the authors' inference-time noise. EquiBind adds it in "
+                             "forward with no training guard, so this makes repeated runs of "
+                             "the same complex disagree — by up to 1.6e3 per component here")
     args = parser.parse_args()
 
     device = args.device if torch.cuda.is_available() else "cpu"
-    encoder = load_encoder(args.model, device, noise=not args.no_noise)
+    # Noise off by default. A frozen representation that changes between two runs of the same
+    # complex cannot be transferred from, compared against, or held to a golden — and the
+    # noise is a training-time augmentation that reached inference through a missing
+    # `self.training` guard rather than a modelling choice.
+    torch.manual_seed(args.seed)
+    encoder = load_encoder(args.model, device, noise=args.noise)
     pool = POOLS[args.pool]
 
     dirs = sorted(d for d in os.listdir(args.complexes)
