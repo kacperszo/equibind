@@ -24,3 +24,8 @@ COPY . /work
 RUN pip install --no-cache-dir --no-deps -e . && \
     python -c "from equibind.models.encoder import EquiBindEncoder; \
 from equibind.features.featurize import get_calpha_graph; print('equibind imports ok')"
+
+# The encoder/head boundary, checked at build time. Needs no checkpoint and no data — the
+# graphs are synthetic — so unlike test_equivariance.py it can run here, and a boundary that
+# only gets checked when somebody remembers is a boundary that drifts.
+RUN python test_transfer.py
