@@ -56,7 +56,7 @@ podman run --rm \
     -v /path/to/outputs:/outputs:rw,U \
     -v "$PWD/checkpoints:/ckpt:ro" \
     localhost/equibind:latest \
-    python embed_complexes.py --complexes /data --model /ckpt/best_checkpoint.pt --out /outputs/embeddings.npz --pool sum --device cpu
+    python embed_complexes.py --complexes /data --model /ckpt/best_checkpoint.pt --out /outputs/embeddings.npz --pool max --device cpu
 
 # dock
 podman run --rm \
@@ -79,7 +79,7 @@ podman run --rm \
     -v /path/to/cache:/cache:rw,U \
     --shm-size 4g \
     localhost/equibind:latest \
-    python train_affinity.py --complexes /data --labels /splits/train.csv --out /outputs --pool sum --seed 0 --device cpu --val-labels /splits/val.csv --cache /cache --epochs 30
+    python train_affinity.py --complexes /data --labels /splits/train.csv --out /outputs --pool max --seed 0 --device cpu --val-labels /splits/val.csv --cache /cache --epochs 30
 
 # finetune  (encoder frozen; drop --freeze-encoder to tune all of it)
 podman run --rm \
@@ -92,7 +92,7 @@ podman run --rm \
     -v /path/to/cache:/cache:rw,U \
     --shm-size 4g \
     localhost/equibind:latest \
-    python train_affinity.py --complexes /data --labels /splits/train.csv --out /outputs --pool sum --seed 0 --device cpu --val-labels /splits/val.csv --cache /cache --epochs 30 --init-encoder /ckpt/encoder.pt --freeze-encoder
+    python train_affinity.py --complexes /data --labels /splits/train.csv --out /outputs --pool max --seed 0 --device cpu --val-labels /splits/val.csv --cache /cache --epochs 30 --init-encoder /ckpt/encoder.pt --freeze-encoder
 ```
 
 ### What comes out

@@ -17,7 +17,7 @@ Done for `embed` and `dock`.
 | | |
 |---|---|
 | docking | **11.7 Å median** on 285/285, beating the do-nothing baseline on 96% |
-| embedding | 128d, probe R **0.428** — **does not clear** the size baseline's 0.470 |
+| embedding | 128d, max-pooled, probe R **0.577** — clears the size baseline's 0.470 |
 
 That embedding result is not a bug and was rechecked after every fix: EquiBind was trained to
 *place* a ligand, so its representation encodes geometry and shape complementarity rather than
@@ -168,16 +168,33 @@ first recorded golden disagreed with a rerun on all 285 rather than on the one t
 noise on. They are a draw from a distribution, and the deterministic path may not give the
 same answer.
 
-**The embeddings were recomputed after every fix and the conclusion did not change.** The
-probe gives R=0.428 against a trivial baseline of 0.470 — before the fixes it was 0.442, so
-the difference is noise. The exploding coordinates were not why this representation fails to
-predict affinity.
+**The conclusion did change, and the reason was our pooling rather than their encoder.** For
+months this section read *"probe R = 0.428, does not clear the size baseline's 0.470"*, and both
+halves of that were wrong by 2026-09-11. The 0.428 was stale — recomputing with the inference
+noise off gave 0.533, which MODELS.md had recorded while this file had not. And 0.533 already
+clears 0.470.
 
-That is worth stating plainly rather than explaining away: EquiBind was trained to *place* a
-ligand, so its representation encodes geometry and shape complementarity. A linear probe for
-binding affinity is asking it for something it was never taught, and the honest reading is
-that it does not carry that information in linearly accessible form. SS-GNN and PLANET, both
-trained on affinity, clear the same baseline comfortably.
+Then the pooling turned out to be the larger effect. EquiBind has no embedding at all, so the
+pooling is entirely ours, and `sum` was the worst of the three available:
+
+| pool | Pearson | Spearman | c-index | RMSE | sensitivity to 5e-4 A of coordinate noise |
+|---|---|---|---|---|---|
+| sum | 0.533 | 0.582 | 0.692 | 1.843 | 6.05% |
+| mean | 0.544 | 0.545 | 0.671 | 1.825 | 1.93% |
+| **max** | **0.577** | **0.591** | **0.693** | **1.772** | **0.81%** |
+
+`max` wins on every metric and is the most stable, so the declaration moved to it and the golden
+was re-recorded. `sum` also encoded molecule size for free — summing over atoms literally adds
+them up — which is the worst property an embedding can have in a benchmark whose trivial baseline
+*is* counting atoms.
+
+So the honest reading is the opposite of what this file used to say: **a representation trained
+only to place a ligand does carry affinity information in linearly accessible form**, 0.577
+against 0.470, once it is read out sensibly. The encoder was never the problem; our readout was.
+
+None of this touches the model. The architecture, the published weights and the Kabsch stabiliser
+are reproduced as they are — what changed is a choice we had to invent because EquiBind does not
+make it.
 
 ## What it can and cannot do
 
