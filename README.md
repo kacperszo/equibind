@@ -18,6 +18,97 @@ while the DGL-based models in this roster needed porting. The docking head is ab
 in the embedding path: ligand and receptor node embeddings are pooled separately and
 concatenated. See [CLAUDE.md](CLAUDE.md).
 
+## Running it without the harness
+
+This fork runs on its own; the benchmark adds bookkeeping, not capability. Every
+command below is generated from the adapter by `gnnb howto`, so it cannot drift from
+what the harness actually runs — regenerate with `python tools/sync_model_readmes.py`.
+
+All of them run with `--network=none` and a read-only root filesystem. Nothing is
+fetched at run time; dependencies are resolved when the image is built.
+
+### What it eats
+
+One directory per complex, named after it:
+
+    <complexes>/<id>/<id>_protein.pdb
+    <complexes>/<id>/<id>_ligand.sdf      # or .mol2; several models try both
+
+Reads the ligand with RDKit and generates its own conformer for docking — the crystallographic pose is the *answer*, so docking must not be given it. Embedding does use the crystal pose, deliberately.
+
+### Build
+
+```bash
+podman build --format=docker -t equibind:latest .
+```
+
+### Run
+
+```bash
+# equibind.modern — localhost/equibind:latest
+# source: models/equibind
+
+# embed
+podman run --rm \
+    --network=none --read-only \
+    --tmpfs /tmp:rw,size=2g \
+    -v /path/to/complexes:/data:ro \
+    -v /path/to/outputs:/outputs:rw,U \
+    -v "$PWD/checkpoints:/ckpt:ro" \
+    localhost/equibind:latest \
+    python embed_complexes.py --complexes /data --model /ckpt/best_checkpoint.pt --out /outputs/embeddings.npz --pool sum --device cpu
+
+# dock
+podman run --rm \
+    --network=none --read-only \
+    --tmpfs /tmp:rw,size=2g \
+    -v /path/to/complexes:/data:ro \
+    -v /path/to/outputs:/outputs:rw,U \
+    -v "$PWD/checkpoints:/ckpt:ro" \
+    localhost/equibind:latest \
+    python dock_complexes.py --complexes /data --model /ckpt/best_checkpoint.pt --out /outputs/predictions.csv --device cpu
+
+# train
+podman run --rm \
+    --network=none --read-only \
+    --tmpfs /tmp:rw,size=2g \
+    -v /path/to/complexes:/data:ro \
+    -v /path/to/outputs:/outputs:rw,U \
+    -v "$PWD/checkpoints:/ckpt:ro" \
+    -v /path/to/splits:/splits:ro \
+    -v /path/to/cache:/cache:rw,U \
+    --shm-size 4g \
+    localhost/equibind:latest \
+    python train_affinity.py --complexes /data --labels /splits/train.csv --out /outputs --pool sum --seed 0 --device cpu --val-labels /splits/val.csv --cache /cache --epochs 30
+
+# finetune  (encoder frozen; drop --freeze-encoder to tune all of it)
+podman run --rm \
+    --network=none --read-only \
+    --tmpfs /tmp:rw,size=2g \
+    -v /path/to/complexes:/data:ro \
+    -v /path/to/outputs:/outputs:rw,U \
+    -v "$PWD/checkpoints:/ckpt:ro" \
+    -v /path/to/splits:/splits:ro \
+    -v /path/to/cache:/cache:rw,U \
+    --shm-size 4g \
+    localhost/equibind:latest \
+    python train_affinity.py --complexes /data --labels /splits/train.csv --out /outputs --pool sum --seed 0 --device cpu --val-labels /splits/val.csv --cache /cache --epochs 30 --init-encoder /ckpt/encoder.pt --freeze-encoder
+```
+
+### What comes out
+
+| file | holds |
+|---|---|
+| `predictions.csv` | docking: `complex_id,rmsd,rmsd_conformer,rmsd_aligned` — the prediction, the do-nothing baseline, and the best a rigid method could manage. A bare RMSD says nothing without the other two |
+| `embeddings.npz` | `ids` and `vectors`, 128-dim — pooled ligand and receptor node embeddings concatenated. Ours, not the authors' |
+| `model.pt` | training only; the IEGMN plus the affinity head from `equibind/models/affinity.py` |
+
+### Before you trust the numbers
+
+**Published inference is not deterministic.** `noise_initial > 0` adds `randn_like` to features and coordinates inside `forward` with no `self.training` guard, so the authors' own settings make a single RMSD a sample rather than a measurement — roughly 0.3-0.5 Å of irreducible spread, and the Kabsch fit perturbs a near-degenerate covariance on top. Our scripts turn it off by default and take `--noise` to restore it.
+
+**The affinity head is ours.** EquiBind has none: it was trained to place a ligand, not to score one, which is what makes it the interesting encoder here and why a fine-tune needs the random-init control run beside it.
+
 <!-- gnn-benchmark:end -->
 
 ---
