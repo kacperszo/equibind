@@ -107,8 +107,28 @@ weights loaded, and only the numbers were wrong:
 ## The port is equivariant; the published method is not
 
 `test_equivariance.py` confirms the encoder is exact to float32 — node features invariant and
-coordinates equivariant to within 4e-05 under random rotation and translation. That is the
-gate that matters, because the encoder is what the embeddings come from.
+coordinates equivariant to within 4e-05 under random rotation and translation.
+
+**`test_head_equivariance.py` now covers the docking head too**, which is the part the authors
+published and the part `dock` has a golden for. The head is equivariant by construction:
+keypoints are a weighted sum of coordinates with weights taken from *features*, so `K -> RK`;
+`a = (rec - mean)^T (lig - mean) -> R a R^T`; and the SVD carries that to
+`rotation -> R rotation R^T`. Measured by rotating receptor and ligand together and checking the
+predicted pose follows:
+
+| perturbation in the Kabsch stabiliser | worst departure | fired |
+|---|---|---|
+| as published, `rand(3, 3) * eye` | **1.49e-01 A** | 4 of 4 solves |
+| a scalar multiple of the identity | **1.14e-05 A** | 4 of 4 |
+
+So one line accounts for all of it. A random diagonal does not commute with `R`; `cI` does —
+`R (a + cI) R^T = R a R^T + cI` — and it conditions the SVD just as well, which makes the
+equivariant version a strictly better stabiliser mathematically.
+
+**It is not applied.** The published weights were trained with the random version in place, so
+changing it would depart from the method being reproduced. It is the right choice for any
+encoder we train ourselves, and the test exists so the cost of leaving it alone stays a number:
+0.15 A, against a median docking RMSD of 11.7 A.
 
 **The published method is stochastic; this port runs it deterministically by default.** Two
 parts introduce randomness:
@@ -119,7 +139,8 @@ parts introduce randomness:
 - **Kabsch stabilisation.** The fit perturbs its covariance with `torch.rand` until well
   conditioned, and on real complexes the keypoints are nearly coplanar (singular values around
   2, 0.02, 6e-05) so it fires every time. The perturbation lives in the world frame, which
-  makes the solved rotation depend on the input orientation.
+  makes the solved rotation depend on the input orientation — **measured at 0.15 A** by
+  `test_head_equivariance.py`, so the rest of the spread below is the noise rather than this.
 
 Together these put roughly 0.3-0.5 A of spread on the predicted pose as the authors run it.
 **Any single RMSD from published EquiBind is a draw from a distribution, not a measurement** —
