@@ -45,6 +45,23 @@ Their state_dict prefixes everything with `iegmn.`; strip it and the names line 
 
 ## Hard-won facts (do NOT regress these)
 
+- **Four config parameters carry no weights, so a wrong value loads cleanly and silently changes
+  what the encoder computes.** The authors' yaml has `use_scalar_features: False`,
+  `rec_square_distance_scale: 10`, and geometry regularisation on with step 0.001. With the port's
+  old defaults, receptor coordinates grew from 83 A to 2400 A across the 8 layers and RMSD read
+  ~250 A. `use_scalar_features` is the nasty one: it changes feature *content* without changing
+  shape, so a 597/597 parameter match proves nothing. **Read `checkpoints/train_arguments.yaml`
+  before concluding anything about compatibility.**
+- **Conformer generation fails on hydrogen-stripped ligands** under current RDKit, and the authors'
+  fallback only catches an embed returning -1, not one that throws — so it fell back to the crystal
+  pose and handed the model the answer. Embed with explicit hydrogens, remove them afterwards.
+- **The docking input must be randomly placed** (`inference.py:366`): centre at the origin, rotate,
+  translate up to 5 A. Feeding the aligned conformer is off-distribution and the model moves it away.
+- **The transform applies to the *evolved* ligand coordinates, not the input ones**
+  (`models/equibind.py:1035`, `use_evolved_lig: true`).
+- Three helper functions were called but never ported; an AST check for called-but-undefined names
+  guards that now.
+
 - **The residue vocabulary is 38 classes, not 37.** The authors' `possible_amino_acids` is
   the 20 standard residues plus 17 non-standard ones (HIP, HIE, TPO, HID, LEV, MEU, PTR,
   GLV, CYT, SEP, HIZ, CYM, GLM, ASQ, TYS, CYX, GLZ) and a trailing `misc`. This port had 37
@@ -62,139 +79,48 @@ Their state_dict prefixes everything with `iegmn.`; strip it and the names line 
   EquiBind checkpoints came back clean — only `OrderedDict`, `_rebuild_tensor_v2` and the
   storage types — but the scan is the point, not the result.
 
-## Docking works, and getting there found four silent bugs
+## Docking: what it does and what travels with the number
 
-`dock` reproduces the authors' protocol end to end. On the full CASF-2016 core set, 285/285
-complexes with no failures: input placed randomly 40.5 A from the truth, model output
-**11.7 A median**, best achievable with the same conformer 1.5 A. It beats the do-nothing
-baseline on 96% of complexes, so the model is clearly working.
+`dock` runs the authors' protocol end to end, 285/285 on the CASF-2016 core set. Input placed
+randomly 40.5 A from the truth, output **11.7 A median**, best achievable with the same conformer
+1.5 A, and it beats the do-nothing baseline on 96% of complexes.
 
-**But it is about twice the paper's ~6.2 A median, and 4.6% within 5 A against their ~20%.** The gap is not explained
-by the random starting position (its correlation with the final RMSD is 0.14). Three
-candidates remain, in order of likelihood: CASF-2016 is not their test set and is a
-different distribution; some protocol detail is still wrong; or another silent config
-mismatch survives. **Settling it needs the original run side by side** — everything up to
-here shows the port is close, not that it is right.
+**That is about twice the paper's ~6.2 A median, and 4.6% within 5 A against their ~20%.** Not
+explained by the starting position (correlation with final RMSD 0.14). CASF-2016 is not their test
+set, so it is a different distribution; beyond that, settling it needs their original run side by
+side. Report the number with this attached.
 
-Getting there required fixing four things that all failed *silently* — the model ran, the
-weights loaded, and only the numbers were wrong:
+**Published inference is not deterministic**, so a single RMSD from it is a draw rather than a
+measurement — roughly 0.3-0.5 A of spread. Two causes, both reproduced faithfully and both
+switched off by default here:
 
-1. **Four config parameters carry no weights**, so a wrong value loads cleanly and changes
-   what the encoder computes. The port's defaults disagreed with the authors' yaml on
-   `use_scalar_features` (True vs **False**), `rec_square_distance_scale` (1.0 vs **10**),
-   `geometry_regularization` and `geometry_reg_step_size`. With those wrong, receptor
-   coordinates grew from 83 A to **2400 A** across 8 layers and keypoints landed in empty
-   space, giving RMSD around 250 A. `use_scalar_features` is the nasty one: it alters node
-   feature *content* without altering shape, so a 597/597 parameter match proves nothing.
-2. **Three helper functions were called but never ported** — `get_rdkit_coords`,
-   `rigid_transform_Kabsch_3D`, `log`. An AST check for called-but-undefined names now
-   guards this.
-3. **Conformer generation fails on hydrogen-stripped ligands** under RDKit 2026
-   ("Cannot be a chiral center", "nbrs.size() >= 3"), and the authors' fallback only catches
-   an embed returning -1, not one that throws. Every test ligand failed, and
-   `get_lig_graph_revised` quietly fell back to the crystal pose — handing the model the
-   answer. Embedding with explicit hydrogens and removing them afterwards fixes it.
-4. **The input must be randomly placed** (`inference.py:366`): centre the conformer at the
-   origin, rotate randomly, translate up to 5 A. Feeding the Kabsch-aligned conformer puts
-   the ligand in the pocket already, which is off-distribution — the model then moves it
-   *away* and scores worse than doing nothing.
+- `noise_initial * noise_decay_rate ** (epoch + 1)` adds noise to features *and* coordinates inside
+  `forward`, with **no `self.training` guard**. At the authors' settings and `epoch=0` that is
+  N(0, 0.5) at inference. `--noise` restores it.
+- the Kabsch fit perturbs its covariance with `torch.rand` until well conditioned, and on real
+  complexes the keypoints are near-coplanar so it fires every time. Because the perturbation is
+  diagonal in the world frame it breaks equivariance, measured at **0.15 A** by
+  `test_head_equivariance.py`. A scalar multiple of the identity conditions the SVD identically and
+  commutes with rotation (1.1e-05 A) — **not applied**, because the weights were trained with the
+  random version.
 
-5. **The transform is applied to the *evolved* ligand coordinates, not the input ones**
-   (`models/equibind.py:1035`, with the authors' `use_evolved_lig: true`). The Kabsch fit is
-   solved from keypoints built out of the evolved coordinates, so applying it to the input
-   makes the answer depend on where the input happened to be placed.
+The encoder itself is equivariant to float precision (`test_equivariance.py`, 4e-05), and so is the
+docking head once that one line is set aside.
 
-## The port is equivariant; the published method is not
+## The embedding is ours, and max-pooled
 
-`test_equivariance.py` confirms the encoder is exact to float32 — node features invariant and
-coordinates equivariant to within 4e-05 under random rotation and translation.
+EquiBind has no affinity head — it was trained to place a ligand — so the pooling is an invention
+of ours and `embed.kind` says `defined`. `max` is declared, chosen by probe over the full core set:
 
-**`test_head_equivariance.py` now covers the docking head too**, which is the part the authors
-published and the part `dock` has a golden for. The head is equivariant by construction:
-keypoints are a weighted sum of coordinates with weights taken from *features*, so `K -> RK`;
-`a = (rec - mean)^T (lig - mean) -> R a R^T`; and the SVD carries that to
-`rotation -> R rotation R^T`. Measured by rotating receptor and ligand together and checking the
-predicted pose follows:
+| pool | Pearson | Spearman | c-index | sensitivity to 5e-4 A of coordinate noise |
+|---|---|---|---|---|
+| sum | 0.533 | 0.582 | 0.692 | 6.05% |
+| mean | 0.544 | 0.545 | 0.671 | 1.93% |
+| **max** | **0.577** | **0.591** | **0.693** | **0.81%** |
 
-| perturbation in the Kabsch stabiliser | worst departure | fired |
-|---|---|---|
-| as published, `rand(3, 3) * eye` | **1.49e-01 A** | 4 of 4 solves |
-| a scalar multiple of the identity | **1.14e-05 A** | 4 of 4 |
-
-So one line accounts for all of it. A random diagonal does not commute with `R`; `cI` does —
-`R (a + cI) R^T = R a R^T + cI` — and it conditions the SVD just as well, which makes the
-equivariant version a strictly better stabiliser mathematically.
-
-**It is not applied.** The published weights were trained with the random version in place, so
-changing it would depart from the method being reproduced. It is the right choice for any
-encoder we train ourselves, and the test exists so the cost of leaving it alone stays a number:
-0.15 A, against a median docking RMSD of 11.7 A.
-
-**The published method is stochastic; this port runs it deterministically by default.** Two
-parts introduce randomness:
-
-- **Noise at inference.** `noise_initial * noise_decay_rate ** (epoch + 1)` with the authors'
-  `noise_initial: 1`, `noise_decay_rate: 0.5`, and `epoch=0` passed by their own
-  `inference.py:385` — so published inference adds N(0, 0.5) to features *and* coordinates.
-- **Kabsch stabilisation.** The fit perturbs its covariance with `torch.rand` until well
-  conditioned, and on real complexes the keypoints are nearly coplanar (singular values around
-  2, 0.02, 6e-05) so it fires every time. The perturbation lives in the world frame, which
-  makes the solved rotation depend on the input orientation — **measured at 0.15 A** by
-  `test_head_equivariance.py`, so the rest of the spread below is the noise rather than this.
-
-Together these put roughly 0.3-0.5 A of spread on the predicted pose as the authors run it.
-**Any single RMSD from published EquiBind is a draw from a distribution, not a measurement** —
-including their own figures.
-
-Both are now off by default, and `--noise` restores the authors' behaviour:
-
-- the encoder's noise is a *training* augmentation that reached inference through a missing
-  `self.training` guard, so switching it off is closer to what the model was meant to do than
-  leaving it on. It is also better: on 24 complexes, within-5 A went from 3.2% to 58.3% and
-  the model beat the untouched conformer on 100% of them rather than 95%.
-- the Kabsch perturbation cannot be removed — it is what keeps the fit conditioned — so it is
-  pinned instead, with `torch.manual_seed`. Without that line, and with the encoder noise
-  already off, two identical runs still disagreed by up to 0.5 A on 14 of 24 complexes.
-  Threads were not the cause; this was.
-
-The placement seed is now derived per complex, from `crc32(complex_id)` rather than drawn from
-one stream shared across the run. A shared stream made every pose depend on how many draws the
-complexes before it consumed, so adding or dropping one shifted all of them — which is why the
-first recorded golden disagreed with a rerun on all 285 rather than on the one that changed.
-
-`gnnb verify equibind.modern` now reproduces docking to 3.6e-15.
-
-**A number that has to be remeasured:** the probe figures below were taken with the encoder
-noise on. They are a draw from a distribution, and the deterministic path may not give the
-same answer.
-
-**The conclusion did change, and the reason was our pooling rather than their encoder.** For
-months this section read *"probe R = 0.428, does not clear the size baseline's 0.470"*, and both
-halves of that were wrong by 2026-09-11. The 0.428 was stale — recomputing with the inference
-noise off gave 0.533, which MODELS.md had recorded while this file had not. And 0.533 already
-clears 0.470.
-
-Then the pooling turned out to be the larger effect. EquiBind has no embedding at all, so the
-pooling is entirely ours, and `sum` was the worst of the three available:
-
-| pool | Pearson | Spearman | c-index | RMSE | sensitivity to 5e-4 A of coordinate noise |
-|---|---|---|---|---|---|
-| sum | 0.533 | 0.582 | 0.692 | 1.843 | 6.05% |
-| mean | 0.544 | 0.545 | 0.671 | 1.825 | 1.93% |
-| **max** | **0.577** | **0.591** | **0.693** | **1.772** | **0.81%** |
-
-`max` wins on every metric and is the most stable, so the declaration moved to it and the golden
-was re-recorded. `sum` also encoded molecule size for free — summing over atoms literally adds
-them up — which is the worst property an embedding can have in a benchmark whose trivial baseline
-*is* counting atoms.
-
-So the honest reading is the opposite of what this file used to say: **a representation trained
-only to place a ligand does carry affinity information in linearly accessible form**, 0.577
-against 0.470, once it is read out sensibly. The encoder was never the problem; our readout was.
-
-None of this touches the model. The architecture, the published weights and the Kabsch stabiliser
-are reproduced as they are — what changed is a choice we had to invent because EquiBind does not
-make it.
+It wins on every metric and is the most stable; `sum` also encodes molecule size, which is the
+benchmark's own trivial baseline. So a geometry-only representation **does** carry affinity linearly
+(0.577 against 0.470) — read the readout before concluding anything about the representation.
 
 ## What it can and cannot do
 
