@@ -5,7 +5,7 @@ the image can use them too.
 """
 
 import pytest
-from torch_geometric.data import Batch
+from torch_geometric.data import Batch, Data
 
 from equibind.synthetic import N_LIG, E_LIG, N_REC, E_REC, _make_lig, _make_rec  # noqa: F401
 
