@@ -3,7 +3,13 @@
 # No DGL: the IEGMN encoder and its featurisation are both ported to PyTorch Geometric,
 # which is why this image is an ordinary pip install rather than a conda archaeology
 # exercise. The authors' published weights load into it unchanged.
-FROM docker.io/library/python:3.13-slim
+# Pinned by digest, not by tag. `python:3.13-slim` is rebuilt upstream every few weeks, so a
+# tag makes the one thing under this image's control — which Python and which system libraries
+# it starts from — depend on the date somebody rebuilt. This is the digest `equibind:cu128` was
+# built from on 2026-11-04, so a rebuild anywhere starts from the same bytes. It does not make a
+# rebuild bit-identical (pip still resolves transitive dependencies), and it is not a substitute
+# for `gnnb verify` against the goldens; it removes the largest source of drift, nothing more.
+FROM docker.io/library/python@sha256:16f75ad0fbc6c4883a8afd63b2d700c3cf68ccffc1aaeca5304ca0a3a908451f
 
 ENV PIP_NO_CACHE_DIR=1 PYTHONUNBUFFERED=1
 
