@@ -1,8 +1,9 @@
-# equibind — the authors' original README
+# equibind — this port's earlier README
 
-Kept for attribution and for the authors' own description of the method. **Its
-instructions are not current for this fork** — see [README.md](README.md) for how to
-build and run what is actually here.
+**This is not the authors' README.** It is an earlier version of the README of this PyTorch
+Geometric port, kept for its description of the method. The authors' own README is in
+[HannesStark/EquiBind](https://github.com/HannesStark/EquiBind). Build and run instructions below
+are out of date; see [README.md](README.md).
 
 ---
 

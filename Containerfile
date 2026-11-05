@@ -8,14 +8,14 @@
 # it starts from — depend on the date somebody rebuilt. This is the digest `equibind:cu128` was
 # built from on 2026-11-04, so a rebuild anywhere starts from the same bytes. It does not make a
 # rebuild bit-identical (pip still resolves transitive dependencies), and it is not a substitute
-# for `gnnb verify` against the goldens; it removes the largest source of drift, nothing more.
+# for comparing outputs against stored reference values; it removes the largest source of drift, nothing more.
 FROM docker.io/library/python@sha256:16f75ad0fbc6c4883a8afd63b2d700c3cf68ccffc1aaeca5304ca0a3a908451f
 
 ENV PIP_NO_CACHE_DIR=1 PYTHONUNBUFFERED=1
 
 # Torch is a build argument so one tree serves both cards. The default is what
 # `equibind:latest` holds and what every published number here was produced with: PyPI's
-# 2.5.1, whose kernels stop at sm_90. Blackwell (sm_120, the lab server's RTX PRO 6000)
+# 2.5.1, whose kernels stop at sm_90. Blackwell (sm_120, an RTX PRO 6000)
 # needs a cu128 build, which still carries sm_75-sm_90 and so runs on every card here:
 #   podman build --format=docker -t equibind:cu128 \
 #     --build-arg TORCH=2.7.1 --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu128 .
@@ -26,8 +26,8 @@ RUN pip install --no-cache-dir torch==${TORCH} --index-url ${TORCH_INDEX}
 # Pinned to exactly what `equibind:latest` resolved, so changing TORCH changes torch and
 # nothing else. Unpinned, a rebuild silently picks up a newer rdkit — and rdkit is part of
 # this model, not a detail around it: it decides which molecule is read, and a difference
-# there is a featurisation change that nothing raises. IGN learned that three times over;
-# see models/ign/CLAUDE.md.
+# there is a featurisation change that nothing raises. Changes of rdkit version alter conformer generation and
+# molecule parsing in ways that surface only as worse numbers.
 RUN pip install --no-cache-dir \
     "torch-geometric==2.6.1" \
     "numpy==2.5.2" \

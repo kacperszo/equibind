@@ -6,7 +6,7 @@ below still trains and still prints a curve, just a worse one for a reason nothi
 
 The load-bearing case is **the embedding surviving transfer** — after a transfer the new model
 must embed exactly as the old one did, because only the head was replaced. That is what makes
-`gnnb probe`'s R = 0.428 a statement about the thing a fine-tune actually starts from, rather
+the linear probe's R = 0.577 a statement about the thing a fine-tune actually starts from, rather
 than about a vector nobody transfers.
 
 A plain script rather than pytest, like `test_equivariance.py` beside it: the image carries no
@@ -68,7 +68,7 @@ def build(seed: int, pool: str = "sum") -> EquiBindAffinity:
 
 
 def encoder_state(model: EquiBindAffinity) -> dict:
-    """The encoder half, named as `gnnb encoder split --strip iegmn.` writes it."""
+    """The encoder half, named as a split of the full checkpoint that strips `iegmn.` writes it."""
     return {k[len("iegmn."):]: v for k, v in model.state_dict().items()
             if k.startswith("iegmn.")}
 
@@ -94,7 +94,7 @@ def _():
 
 @case("the docking-head prefixes are exactly the keys the port does not implement")
 def _():
-    """If these disagree, `gnnb encoder split` either drops encoder weights or smuggles the
+    """If these disagree, a split either drops encoder weights or smuggles the
     docking head across, and the strict load is the only thing that would notice."""
     encoder_names = set(encoder_state(build(seed=0)))
     for prefix in DOCKING_HEAD_PREFIXES:
@@ -216,7 +216,7 @@ def _():
 
 @case("an already-prefixed encoder loads")
 def _():
-    """`gnnb encoder split` without --strip writes iegmn.-prefixed names; both shapes must work."""
+    """a split that does not strip writes iegmn.-prefixed names; both shapes must work."""
     with tempfile.TemporaryDirectory() as tmp:
         source = build(seed=0)
         state = {k: v for k, v in source.state_dict().items() if k.startswith("iegmn.")}

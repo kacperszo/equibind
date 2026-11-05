@@ -1,12 +1,12 @@
 """Fine-tune the EquiBind encoder on affinity, with a head it never had.
 
-EquiBind predicts a binding pose. It has no affinity head and no affinity loss, so unlike every
-other trainer in this benchmark this one is not a reproduction of anything — it is the transfer
+EquiBind predicts a binding pose. It has no affinity head and no affinity loss, so unlike a
+reproduction trainer this one reproduces nothing — it is the transfer
 experiment itself, and `equibind/models/affinity.py` says which part is ours.
 
-The question it exists to answer: `gnnb probe` found R = 0.428 from a *frozen* representation
-read by a *linear* model, below the 0.470 that counting heavy atoms achieves. That is a real
-result about frozen geometry embeddings. It says nothing about what the same encoder does when
+The question it exists to answer: a linear probe on the *frozen*, max-pooled representation
+reaches R = 0.577 on the CASF-2016 core set, against 0.470 for counting heavy atoms and bonds.
+That is a result about frozen geometry embeddings. It says nothing about what the same encoder does when
 its weights are allowed to move, and the two runs worth comparing are:
 
     --freeze-encoder    the probe again, with a non-linear head. Does the representation carry
@@ -152,7 +152,7 @@ def main() -> int:
     p.add_argument("--out", required=True, help="output directory")
     p.add_argument("--cache", default=None)
     p.add_argument("--init-encoder", dest="init_encoder", default=None,
-                   help="encoder .pt from `gnnb encoder split`; omit for the random-init control")
+                   help="encoder-only .pt (no head tensors); omit for the random-init control")
     p.add_argument("--freeze-encoder", dest="freeze_encoder", action="store_true")
     p.add_argument("--pool", default="sum", choices=["sum", "mean", "max"],
                    help="must match what embed_complexes.py wrote for the probe to be "

@@ -271,7 +271,7 @@ def get_receptor_inference(rec_path):
 
 
 def log(*args):
-    """The original logs to a file; here it goes to stdout, which the harness captures."""
+    """The original logs to a file; here it goes to stdout."""
     print(*args)
 
 

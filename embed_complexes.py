@@ -4,8 +4,8 @@ EquiBind was never trained on affinity — it learns to place a ligand in a pock
 is already absent from this port, so what comes out is the IEGMN's per-node representations
 for both sides, plus the coordinates it evolved them to.
 
-Pooling each side and concatenating gives 2 x 64 dims. As with every other model in this
-benchmark the pooling is ours, not the authors', so the embedding is `defined`.
+Pooling each side and concatenating gives 2 x 64 dims. EquiBind has no affinity head, so the
+pooling is ours, not the authors'.
 
 usage:
     python embed_complexes.py --complexes DIR --model checkpoints/best_checkpoint.pt \

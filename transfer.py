@@ -16,7 +16,7 @@ written to the encoder and stops there — and precisely what produces the embed
 `embed_complexes.py` writes. Encoder boundary, port boundary and embedding boundary are the
 same cut, which is as good as this gets.
 
-`prefix` is the mirror of the harness's `strip`: the split removes `iegmn.` on the way out so
+`prefix` is the mirror of the split's prefix stripping: the split removes `iegmn.` on the way out so
 the file's names match the port, and this puts it back on the way in so they match the
 composite model. Cutting and loading have to agree about naming or the load silently moves
 nothing.
@@ -32,7 +32,7 @@ import torch.nn as nn
 HEAD_PREFIXES = ("affinity",)
 
 #: The docking head inside the authors' checkpoint, under `iegmn.` and stripped along with it.
-#: Must agree with `encoder.head` for equibind.modern in harness/registry.toml.
+#: Must name exactly the docking-head keys of the authors' checkpoint (test_transfer.py checks it).
 DOCKING_HEAD_PREFIXES = ("h_mean_lig", "h_mean_rec", "keypts_attention_lig",
                          "keypts_attention_rec", "keypts_queries_lig", "keypts_queries_rec")
 
@@ -75,7 +75,7 @@ def transfer_encoder(model: nn.Module, path: str, freeze: bool = False,
     if docking:
         raise SystemExit(
             f"{path} carries {len(docking)} docking-head tensors ({docking[:3]}). That is the "
-            f"whole checkpoint — cut it with `gnnb encoder split`, which knows the boundary."
+            f"whole checkpoint — pass a file holding encoder tensors only."
         )
     unknown = [k for k in encoder if k not in target]
     if unknown:

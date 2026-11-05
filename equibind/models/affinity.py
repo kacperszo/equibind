@@ -1,11 +1,12 @@
 """An affinity head for the IEGMN encoder. Ours, and labelled as such.
 
 EquiBind has no affinity head — it was trained to *place* a ligand, and the head it does have
-solves for a rigid transform. That is exactly what makes it the interesting encoder in this
-benchmark: every other model here was trained on the number we are asking it to predict.
+solves for a rigid transform. That is exactly what makes it an interesting encoder to transfer
+from: it was never trained on the number we are asking it to predict.
 
-`gnnb probe` already asked the frozen version of this question and answered R = 0.428, below
-the 0.470 a linear model gets from counting heavy atoms. That is a result about a *frozen*
+A linear probe on the frozen, max-pooled embedding already asked the frozen version of this
+question (CASF-2016 core set, 285 complexes) and answered R = 0.577, above the 0.470 a linear
+model gets from counting heavy atoms and bonds. That is a result about a *frozen*
 representation read by a *linear* probe. Whether the same representation, fine-tuned, can
 compete is a different question, and it needs a head to ask it with.
 
@@ -14,10 +15,10 @@ compete is a different question, and it needs a head to ask it with.
 between the encoder and the head is learned. Any other choice would make the probe number and
 the fine-tune describe different representations.
 
-**Sum pooling hands the model molecule size for free.** It is the default because it is what
-the declared embedding uses, and because a benchmark should not quietly diverge from what it
-recorded — but `--pool mean` is the ablation that removes the shortcut, and the gap between
-the two is worth reporting whenever this head is trained.
+**Sum pooling hands the model molecule size for free.** It is the default here, but the
+probe above used max pooling, so pass `--pool max` for a fine-tune that starts from the
+representation that was probed. `--pool mean` is the ablation that removes the size shortcut,
+and the gap between the two is worth reporting whenever this head is trained.
 """
 
 from __future__ import annotations
