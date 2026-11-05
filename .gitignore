@@ -22,3 +22,6 @@ checkpoints/
 
 # scratch logs from dataset construction
 temp_*.log
+
+# local assistant settings: hold absolute paths from the machine they were written on
+.claude/
