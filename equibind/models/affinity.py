@@ -58,8 +58,8 @@ class EquiBindAffinity(nn.Module):
     """The published encoder with an affinity head on top.
 
     The attribute is named `iegmn` on purpose: that is what the authors' own checkpoint calls
-    the encoder, so an encoder cut from it with `gnnb encoder split` loads here under the names
-    it already carries rather than needing a rename in between.
+    the encoder, so an encoder cut out of it loads here under the names it already carries
+    rather than needing a rename in between.
     """
 
     def __init__(self, encoder: nn.Module, feats_dim: int = 64, pool: str = "sum",
